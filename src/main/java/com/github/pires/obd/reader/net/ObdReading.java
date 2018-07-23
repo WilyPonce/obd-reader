@@ -89,7 +89,7 @@ public class ObdReading {
 
     public String toString() {
 
-        return "lat:" + latitude + ";" +
+        return ";lat:" + latitude + ";" +
                 "long:" + longitude + ";" +
                 "alt:" + altitude + ";" +
                 "vin:" + vin + ";" +

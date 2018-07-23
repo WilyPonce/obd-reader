@@ -59,6 +59,7 @@ import com.google.inject.Inject;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -78,7 +79,7 @@ import static com.github.pires.obd.reader.activity.ConfigActivity.getGpsUpdatePe
 // Some code taken from https://github.com/barbeau/gpstest
 
 @ContentView(R.layout.main)
-public class MainActivity extends RoboActivity implements ObdProgressListener, LocationListener, GpsStatus.Listener {
+public class MainActivity extends RoboActivity implements ObdProgressListener, LocationListener, GpsStatus.Listener, SensorEventListener {
 
     private static final String TAG = MainActivity.class.getName();
     private static final int NO_BLUETOOTH_ID = 0;
@@ -108,6 +109,14 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
     /// the trip log
     private TripLog triplog;
     private TripRecord currentTrip;
+
+    ArrayList<ObdCommand> selectedOBD;
+    ArrayList<String> selectedObdIds;
+
+    //Accelerometer
+    double accX=0.0;
+    double accY=0.0;
+    double accZ=0.0;
 
     @InjectView(R.id.compass_text)
     private TextView compass;
@@ -195,7 +204,12 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
                     Map<String, String> temp = new HashMap<String, String>();
                     temp.putAll(commandResult);
                     ObdReading reading = new ObdReading(lat, lon, alt, System.currentTimeMillis(), vin, temp);
-                    if(reading != null) myCSVWriter.writeLineCSV(reading);
+
+                    //selectedOBD
+                    if(reading != null && selectedOBD != null) myCSVWriter.writeLineCSV(reading,selectedObdIds, accX, accY, accZ);
+                    else Log.d(TAG, " No selected OBD");
+                    //if(reading != null) myCSVWriter.writeLineCSV(reading);
+
                 }
                 commandResult.clear();
             }
@@ -203,6 +217,14 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
             new Handler().postDelayed(mQueueCommands, ConfigActivity.getObdUpdatePeriod(prefs));
         }
     };
+
+    public ArrayList<String> getSelectedObdIds(ArrayList<ObdCommand> selecOBD){
+        ArrayList<String> retArray = new ArrayList<String>();
+        for(ObdCommand obdc : selecOBD){
+            retArray.add(LookUpCommand(obdc.getName()));
+        }
+        return retArray;
+    }
     private Sensor orientSensor = null;
     private PowerManager.WakeLock wakeLock = null;
     private boolean preRequisites = true;
@@ -271,7 +293,8 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
         } else if (job.getState().equals(ObdCommandJob.ObdCommandJobState.NOT_SUPPORTED)) {
             cmdResult = getString(R.string.status_obd_no_support);
         } else {
-            cmdResult = job.getCommand().getFormattedResult();
+            cmdResult = job.getCommand().getCalculatedResult();
+            //cmdResult = job.getCommand().getFormattedResult();
             if(isServiceBound)
                 obdStatusTextView.setText(getString(R.string.status_obd_data));
         }
@@ -303,6 +326,20 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
         return false;
     }
 
+    private void sensorsInit(){
+        SensorManager sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+
+        List<Sensor> listaSensores = sensorManager.getSensorList(Sensor.TYPE_ALL);
+
+        listaSensores = sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
+
+        if (!listaSensores.isEmpty()) {
+            Sensor acelerometerSensor = listaSensores.get(0);
+            sensorManager.registerListener(this, acelerometerSensor,
+                    SensorManager.SENSOR_DELAY_NORMAL);
+        }
+    }
+
     private void updateTripStatistic(final ObdCommandJob job, final String cmdID) {
 
         if (currentTrip != null) {
@@ -322,6 +359,9 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+
+        sensorsInit();
 
         final BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
         if (btAdapter != null)
@@ -449,6 +489,9 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
 
     private void startLiveData() {
         Log.d(TAG, "Starting live data..");
+
+        selectedOBD = ConfigActivity.getObdCommands(prefs);//selected OBD commands arraylist;
+        selectedObdIds = getSelectedObdIds(selectedOBD);
 
         tl.removeAllViews(); //start fresh
         doBindService();
@@ -594,13 +637,13 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
     }
 
     /**
-     *
+     *In here it checks the preferences to request the ObdJob of those commands checked
      */
     private void queueCommands() {
         if (isServiceBound) {
             for (ObdCommand Command : ObdConfig.getCommands()) {
                 if (prefs.getBoolean(Command.getName(), true))
-                    service.queueJob(new ObdCommandJob(Command));
+                    service.queueJob(new ObdCommandJob(Command)); // puts a queueJob
             }
         }
     }
@@ -691,6 +734,30 @@ public class MainActivity extends RoboActivity implements ObdProgressListener, L
             mGpsIsStarted = false;
             gpsStatusTextView.setText(getString(R.string.status_gps_stopped));
         }
+    }
+
+    // SENSOR
+    @Override
+    public void onSensorChanged(SensorEvent sensorEvent) {
+
+        if(isServiceBound) {
+            synchronized (this) {
+                switch (sensorEvent.sensor.getType()) {
+
+                    case Sensor.TYPE_ACCELEROMETER:
+                        accX = sensorEvent.values[0];
+                        accY = sensorEvent.values[1];
+                        accZ = sensorEvent.values[2];
+                        //accels = event.values.clone();
+                        break;
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int i) {
+
     }
 
     /**
